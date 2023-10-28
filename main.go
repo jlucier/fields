@@ -17,6 +17,7 @@ const (
 	numParticles = 2048
 	maxAge       = 60 * 2
 	noiseFactor  = 50
+	partSize     = 2
 )
 
 type Particle struct {
@@ -41,10 +42,12 @@ type Game struct {
 	field     []engine.Vec2
 	particles []Particle
 	text      *sdl.Texture
+	black     *sdl.Texture
 }
 
 func (self *Game) Close() {
 	self.text.Destroy()
+	self.black.Destroy()
 }
 
 func (self *Game) cellCenter(x uint, y uint) (uint, uint) {
@@ -65,8 +68,6 @@ func (self *Game) getFieldVec(x uint, y uint) *engine.Vec2 {
 }
 
 func InitGame(app *engine.App, cellSize uint, noiseSeed int64) Game {
-	app.Renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
-
 	cx := windowWidth / cellSize
 	cy := windowHeight / cellSize
 	ncells := cx * cy
@@ -81,6 +82,19 @@ func InitGame(app *engine.App, cellSize uint, noiseSeed int64) Game {
 		panic(err)
 	}
 
+	black, err := app.Renderer.CreateTexture(
+		sdl.PIXELFORMAT_RGBA8888,
+		sdl.TEXTUREACCESS_TARGET,
+		windowWidth,
+		windowHeight,
+	)
+	if err != nil {
+		panic(err)
+	}
+	app.Renderer.SetRenderTarget(black)
+	app.Renderer.SetDrawColor(0, 0, 0, 255)
+	app.Renderer.FillRect(&sdl.Rect{0, 0, windowWidth, windowHeight})
+
 	game := Game{
 		0,
 		cellSize,
@@ -88,6 +102,7 @@ func InitGame(app *engine.App, cellSize uint, noiseSeed int64) Game {
 		make([]engine.Vec2, ncells),
 		make([]Particle, numParticles),
 		ptext,
+		black,
 	}
 
 	// Initialize vectors
@@ -128,7 +143,7 @@ func (self *Game) handleKeys(app *engine.App, t *sdl.KeyboardEvent) {
 	}
 }
 
-func (self *Game) moveParticles() {
+func (self *Game) moveParticles(renderer *sdl.Renderer) {
 	for i := range self.particles {
 		p := &self.particles[i]
 
@@ -136,11 +151,12 @@ func (self *Game) moveParticles() {
 			// die
 			*p = RandParticle()
 		} else {
-			// move
+			// get current field vec
 			cx := uint(p.pos.X / float64(self.cellSize))
 			cy := uint(p.pos.Y / float64(self.cellSize))
-
 			fv := self.getFieldVec(cx, cy)
+
+			// move
 			p.pos = p.pos.Add(*fv)
 			p.pos.X = engine.Clamp(p.pos.X, 0, windowWidth-1)
 			p.pos.Y = engine.Clamp(p.pos.Y, 0, windowHeight-1)
@@ -148,10 +164,10 @@ func (self *Game) moveParticles() {
 	}
 }
 
-func (self *Game) fixedUpdate(t time.Time) {
+func (self *Game) fixedUpdate(app *engine.App, t time.Time) {
 	switch self.state {
 	case 0:
-		self.moveParticles()
+		self.moveParticles(app.Renderer)
 	}
 }
 
@@ -178,36 +194,74 @@ func (self *Game) drawVecs(renderer *sdl.Renderer) {
 }
 
 func (self *Game) drawParticles(renderer *sdl.Renderer) {
+	// fade current texture
+	// sdl.Do(func() {
+	// 	renderer.SetRenderTarget(self.text)
+	// 	self.text.SetBlendMode(sdl.BLENDMODE_BLEND)
+	// 	self.text.SetAlphaMod(10)
+	// 	renderer.Copy(self.text, nil, nil)
+	// })
+
 	sdl.Do(func() {
 		renderer.SetRenderTarget(self.text)
-		self.text.SetBlendMode(sdl.BLENDMODE_BLEND)
-		self.text.SetAlphaMod(20)
-		renderer.Copy(self.text, nil, nil)
-
-		// render current position
-		renderer.SetDrawColor(0, 255, 255, 255)
+		renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
 		for _, p := range self.particles {
+			// draw current position in texture
 			px := int32(p.pos.X)
 			py := int32(p.pos.Y)
 
-			renderer.DrawPoint(px, py)
+			delta := uint8(engine.Lerp(0, 255, float64(p.age)/float64(maxAge)))
+
+			renderer.SetDrawColor(delta, 255-delta, 255, 255)
+			if partSize == 1 {
+				renderer.DrawPoint(px, py)
+			} else {
+				startx := engine.Clamp(float64(px), 0, windowWidth)
+				starty := engine.Clamp(float64(py), 0, windowHeight)
+				renderer.FillRect(&sdl.Rect{int32(startx), int32(starty), partSize, partSize})
+			}
 		}
 	})
 
 	sdl.Do(func() {
 		renderer.SetRenderTarget(nil)
 		self.text.SetBlendMode(sdl.BLENDMODE_NONE)
+		self.text.SetAlphaMod(255)
 		renderer.Copy(self.text, nil, nil)
+	})
+}
+
+func (self *Game) drawTest(renderer *sdl.Renderer) {
+	sdl.Do(func() {
+		renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
+		renderer.SetDrawColor(0, 255, 255, 100)
+		renderer.DrawLine(0, 0, 100, 100)
+
+		renderer.SetDrawColor(0, 255, 255, 50)
+		renderer.DrawLine(100, 0, 200, 100)
+
+		renderer.SetDrawColor(0, 255, 255, 10)
+		renderer.DrawLine(200, 0, 300, 100)
+
+		// renderer.SetRenderTarget(self.text)
+		// renderer.SetDrawColor(0, 0, 0, 255)
+		// renderer.FillRect(&sdl.Rect{0, 0, windowWidth, windowHeight})
+		//
+		// renderer.SetRenderTarget(nil)
+		// self.text.SetBlendMode(sdl.BLENDMODE_BLEND)
+		// self.text.SetAlphaMod(100)
+		// renderer.Copy(self.text, nil, nil)
 	})
 }
 
 func (self *Game) render(renderer *sdl.Renderer, window *sdl.Window) {
 	// self.drawVecs(renderer)
 	self.drawParticles(renderer)
+	// self.drawTest(renderer)
 }
 
 func main() {
-	seed := int64(0) // time.Now().UnixMicro()
+	seed := int64(0) //time.Now().UnixMicro()
 	fmt.Println("seed", seed)
 
 	app := engine.CreateApp("FlowField", windowWidth, windowHeight)

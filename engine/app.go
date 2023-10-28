@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"github.com/veandco/go-sdl2/sdl"
 	"os"
 	"sync"
@@ -42,17 +43,18 @@ func CreateApp(title string, width int32, height int32) *App {
 type GameCallbacks struct {
 	Render      func(*sdl.Renderer, *sdl.Window)
 	HandleKeys  func(*App, *sdl.KeyboardEvent)
-	FixedUpdate func(time.Time)
+	FixedUpdate func(*App, time.Time)
 }
 
 func (self *App) Run(cbs GameCallbacks) {
 	var exitcode int
 	sdl.Main(func() {
 		for self.running {
+			start := time.Now()
 			// updates
 			if time.Now().Sub(self.lastFixedUpdate) > fixedUpdateNs {
 				self.lastFixedUpdate = time.Now()
-				go cbs.FixedUpdate(self.lastFixedUpdate)
+				go cbs.FixedUpdate(self, self.lastFixedUpdate)
 			}
 
 			// input
@@ -80,6 +82,7 @@ func (self *App) Run(cbs GameCallbacks) {
 			cbs.Render(self.Renderer, self.Window)
 
 			sdl.Do(func() {
+				fmt.Println("present:", time.Now().Sub(start).Microseconds(), "us")
 				self.Renderer.Present()
 			})
 		}
